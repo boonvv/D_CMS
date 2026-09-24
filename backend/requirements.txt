@@ -1,7 +1,10 @@
 fastapi==0.115.0
 uvicorn==0.30.6
 sqlalchemy==2.0.35
-strawberry-graphql[fastapi]==0.239.0
+# Strawberry 0.239 imports removed private Pydantic internals.
+# Keep Strawberry current enough to support the Pydantic 2.x used by FastAPI.
+strawberry-graphql[fastapi]>=0.243.0,<1.0
+pydantic>=2.9.0,<3.0
 pyjwt==2.9.0
 passlib==1.7.4
 bcrypt==4.1.2
