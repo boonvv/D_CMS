@@ -1,0 +1,217 @@
+import { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import Sidebar from '../components/Sidebar';
+import { Project, User } from '../types';
+
+const projectQuery = `
+  query Project($projectId: ID!) {
+    project(projectId: $projectId) {
+      id
+      title
+      description
+      createdAt
+      updatedAt
+      tasks {
+        id
+        title
+        description
+        completed
+        projectId
+        createdAt
+        completedAt
+      }
+    }
+  }
+`;
+
+const createTaskMutation = `
+  mutation CreateTask($projectId: ID!, $title: String!, $description: String) {
+    createTask(projectId: $projectId, title: $title, description: $description) {
+      id
+      title
+      description
+      completed
+      projectId
+      createdAt
+      completedAt
+    }
+  }
+`;
+
+const toggleTaskMutation = `
+  mutation ToggleTask($taskId: ID!, $completed: Boolean!) {
+    toggleTask(taskId: $taskId, completed: $completed) {
+      id
+      completed
+      completedAt
+    }
+  }
+`;
+
+type ProjectDetailPageProps = {
+  user: User;
+  onLogout: () => void;
+};
+
+export default function ProjectDetailPage({ user, onLogout }: ProjectDetailPageProps) {
+  const { projectId } = useParams();
+  const navigate = useNavigate();
+  const token = localStorage.getItem('workspace_token') || '';
+  const [project, setProject] = useState<Project | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [taskTitle, setTaskTitle] = useState('');
+  const [taskDescription, setTaskDescription] = useState('');
+
+  useEffect(() => {
+    if (!projectId) return;
+
+    fetch('http://localhost:8000/graphql', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ query: projectQuery, variables: { projectId } }),
+    })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok || payload.errors) {
+          throw new Error(payload.errors?.[0]?.message || 'Unable to fetch project');
+        }
+        setProject(payload.data.project as Project);
+      })
+      .catch((error) => console.error(error))
+      .finally(() => setLoading(false));
+  }, [projectId, token]);
+
+  const refreshProject = async () => {
+    if (!projectId) return;
+
+    const response = await fetch('http://localhost:8000/graphql', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ query: projectQuery, variables: { projectId } }),
+    });
+
+    const payload = await response.json();
+    if (!response.ok || payload.errors) {
+      throw new Error(payload.errors?.[0]?.message || 'Unable to refresh project');
+    }
+
+    setProject(payload.data.project as Project);
+  };
+
+  const handleCreateTask = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!projectId) return;
+
+    const response = await fetch('http://localhost:8000/graphql', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        query: createTaskMutation,
+        variables: { projectId, title: taskTitle, description: taskDescription },
+      }),
+    });
+
+    const payload = await response.json();
+    if (!response.ok || payload.errors) {
+      console.error(payload.errors?.[0]?.message || 'Unable to create task');
+      return;
+    }
+
+    setTaskTitle('');
+    setTaskDescription('');
+    await refreshProject();
+  };
+
+  const handleToggleTask = async (taskId: string, completed: boolean) => {
+    const response = await fetch('http://localhost:8000/graphql', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        query: toggleTaskMutation,
+        variables: { taskId, completed: !completed },
+      }),
+    });
+
+    const payload = await response.json();
+    if (!response.ok || payload.errors) {
+      console.error(payload.errors?.[0]?.message || 'Unable to update task');
+      return;
+    }
+
+    await refreshProject();
+  };
+
+  if (loading) return <div className="app-shell loading-screen">Loading project...</div>;
+  if (!project) return <div className="app-shell loading-screen">Project not found</div>;
+
+  return (
+    <div className="app-shell">
+      <Sidebar username={user.username} onLogout={onLogout} />
+
+      <main className="main-panel project-detail-panel">
+        <header className="topbar detail-topbar">
+          <div>
+            <button className="back-button" onClick={() => navigate('/')}>← Back</button>
+            <span className="eyebrow">Workspace</span>
+            <h1>{project.title}</h1>
+          </div>
+        </header>
+
+        <section className="project-detail-card">
+          <p>{project.description || 'No description provided yet.'}</p>
+          <div className="card-stats">
+            <span>{project.tasks.length} tasks</span>
+            <span>{project.tasks.filter((task) => task.completed).length} completed</span>
+          </div>
+        </section>
+
+        <section className="task-composer">
+          <h2>Add task</h2>
+          <form onSubmit={handleCreateTask} className="task-form">
+            <input
+              value={taskTitle}
+              onChange={(event) => setTaskTitle(event.target.value)}
+              placeholder="Task title"
+              required
+            />
+            <textarea
+              value={taskDescription}
+              onChange={(event) => setTaskDescription(event.target.value)}
+              placeholder="Optional details"
+            />
+            <button type="submit" className="primary-button">Add task</button>
+          </form>
+        </section>
+
+        <section className="task-list">
+          <h2>Task board</h2>
+          {project.tasks.length === 0 ? (
+            <p>No tasks in this project yet.</p>
+          ) : (
+            project.tasks.map((task) => (
+              <div key={task.id} className={`task-item ${task.completed ? 'completed' : ''}`}>
+                <label className="checkbox-row">
+                  <input type="checkbox" checked={task.completed} onChange={() => handleToggleTask(task.id, task.completed)} />
+                  <span>{task.title}</span>
+                </label>
+                {task.description ? <p>{task.description}</p> : null}
+              </div>
+            ))
+          )}
+        </section>
+      </main>
+    </div>
+  );
+}
